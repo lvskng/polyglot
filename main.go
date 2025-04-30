@@ -56,11 +56,17 @@ func generateProperties() {
 	if err != nil {
 		panic(err)
 	}
+
 	file, diag := hclsyntax.ParseConfig(content, inputFilePath, hcl.Pos{Line: 1, Column: 1})
+	if file == nil {
+		panic(fmt.Sprintln("Could not parse input file", inputFilePath))
+	}
+
 	if diag.HasErrors() {
 		fmt.Println(diag.Error())
 		return
 	}
+
 	searchConfig(file.Body)
 	blocks := traverseBlocks(file.Body, "")
 	err = os.MkdirAll(outPath, os.ModePerm)
@@ -78,11 +84,8 @@ func generateProperties() {
 		for path, trans := range blocks {
 			val, ok := trans[lang]
 			if !ok {
-				val, ok = trans["all"]
-				if !ok {
-					fmt.Printf("[ERROR] No translation for language '%s' and 'all' in path '%s'\n", lang, path)
-					continue
-				}
+				fmt.Printf("[ERROR] No translation for language '%s' and 'default' in path '%s'\n", lang, path)
+				continue
 			}
 			optFile.WriteString(path + "=" + val + "\n")
 		}
@@ -98,11 +101,8 @@ func generateProperties() {
 		for path, trans := range blocks {
 			val, ok := trans[defaultLang]
 			if !ok {
-				val, ok = trans["all"]
-				if !ok {
-					fmt.Printf("[ERROR] No translation for default language '%s' in path '%s'\n", defaultLang, filePath)
-					continue
-				}
+				fmt.Printf("[ERROR] No translation for default language '%s' in path '%s'\n", defaultLang, filePath)
+				continue
 			}
 			optFile.WriteString(path + "=" + val + "\n")
 		}
@@ -149,9 +149,9 @@ func searchConfig(body hcl.Body) {
 		panic("[ERROR] No languages declaration found. Please specify the used languages like this:\nlangs = [en, nl]")
 	}
 	if !foundDefault {
-		fmt.Println("[WARNING] No default language specified")
-	}
-	if !slices.Contains(langs, defaultLang) {
+		fmt.Println("[WARNING] No default language specified, defaulting to 'default'")
+		defaultLang = "default"
+	} else if !slices.Contains(langs, defaultLang) {
 		panic(fmt.Sprintf("[ERROR] The default language '%s' is not contained in the languages declaration (%+v)", defaultLang, langs))
 	}
 }
@@ -194,7 +194,7 @@ func traverseBlocks(body hcl.Body, path string) map[string]map[string]string {
 				fmt.Println("[ERROR] Error evaluating value for", attrName, diags.Error())
 				continue //?
 			}
-			if !slices.Contains(langs, attrName) && attrName != "all" {
+			if !slices.Contains(langs, attrName) && attrName != "default" {
 				fmt.Printf("[WARNING] Unknown attribute '%s' in path '%s'\n", attrName, path)
 				continue
 			}
@@ -228,7 +228,7 @@ func migrateProperties() {
 			filePath := filepath.Join(migrateInDir, file.Name())
 			var lang string
 			if file.Name() == "i18n.properties" {
-				lang = "all"
+				lang = "default"
 				haveDefaultLang = true
 			} else {
 				lang = strings.Split(strings.Split(file.Name(), "i18n_")[1], ".properties")[0] //Get the language name from the file name (thanks SAP)
@@ -253,16 +253,16 @@ func migrateProperties() {
 			}
 		}
 	}
-	//Remove unnecessary "all" entries
+	//Remove unnecessary "default" entries
 	if haveDefaultLang {
 		for _, block := range blocks {
 			if block.Attributes != nil && len(block.Attributes) == len(langs)+1 {
 				for lang, trans := range block.Attributes {
-					//All langs are defined and the "all" entry equals at least one other
+					//All langs are defined and the "default" entry equals at least one other
 					//If it doesn't equal another entry, we assume the default string has its place and keep it
-					if lang != "all" {
-						if trans == block.Attributes["all"] {
-							delete(block.Attributes, "all")
+					if lang != "default" {
+						if trans == block.Attributes["default"] {
+							delete(block.Attributes, "default")
 						}
 					}
 				}
@@ -324,7 +324,7 @@ func migrateProperties() {
 	fmt.Println("Successfully migrated the .properties files")
 }
 
-// Recursively look up wether the parent exists, if not create it, set the reference to the original block
+// Recursively look up whether the parent exists, if not create it, set the reference to the original block
 // If there are path members left repeat with the newly created block (and ofc the updated parameters)
 func findOrCreateParents(b *HCLBlock, parentPathMembers []string, blocks *map[string]*HCLBlock) {
 	if len(parentPathMembers) < 1 {
