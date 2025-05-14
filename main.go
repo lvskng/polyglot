@@ -356,6 +356,9 @@ func serializeHCL(block *HCLBlock, indentLevel int) string {
 
 	// Attributes
 	for key, value := range block.Attributes {
+		if strings.Contains(value, "\"") {
+			value = strings.Replace(value, "\"", "\\\"", -1)
+		}
 		hclBuilder.WriteString(fmt.Sprintf("%s\t%s = \"%v\"\n", indent, key, value))
 	}
 
